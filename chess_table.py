@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import json
 import os
 
@@ -19,18 +20,23 @@ def json_to_path(json_file):
 
     return path_list
 
-def open_image(path):
-    img = cv2.imread(os.path.join(imagesDir, path))
+def rotate_image(img):
+    return
 
-    # Resize image to facilitate visualization
-    img = cv2.resize(img, (0, 0), fx = 0.4, fy = 0.4)
+def transform_image(img):
+    img = cv2.imread(os.path.join(imagesDir, p))
+    
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    gaussian_blur = cv2.GaussianBlur(gray_img,(5,5),0)
+    plt.imshow(gaussian_blur,cmap="gray")
 
-    # Show image
-    cv2.imshow('Image', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    plt.show()
+
+def read_images(paths):
+    for p in paths:
+        transform_image(p)
 
 # Application Logic
 all_paths = json_to_path(os.path.join(imagesDir, 'test.json'))
-for path in all_paths:
-    open_image(path)
+read_images(all_paths)
