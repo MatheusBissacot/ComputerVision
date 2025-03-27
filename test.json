@@ -1,1 +1,37 @@
-{"info": {"description": "Test Dataset", "version": "1.0", "year": 2025, "date_created": "19/03/2025", "author": "Matheus Bissacot"}, "images": [{"file_name": "G000_IMG000.jpg", "path": "images/0/G000_IMG000.jpg", "camera": "Huawei P40 pro", "height": 3072, "width": 3072, "game_id": 0, "move_id": 0, "id": 0}, {"file_name": "G000_IMG001.jpg", "path": "images/0/G000_IMG001.jpg", "camera": "Huawei P40 pro", "height": 3072, "width": 3072, "game_id": 0, "move_id": 1, "id": 1}, {"file_name": "G000_IMG002.jpg", "path": "images/0/G000_IMG002.jpg", "camera": "Huawei P40 pro", "height": 3072, "width": 3072, "game_id": 0, "move_id": 2, "id": 2}, {"file_name": "G000_IMG003.jpg", "path": "images/0/G000_IMG003.jpg", "camera": "Huawei P40 pro", "height": 3072, "width": 3072, "game_id": 0, "move_id": 3, "id": 3}, {"file_name": "G000_IMG004.jpg", "path": "images/0/G000_IMG004.jpg", "camera": "Huawei P40 pro", "height": 3072, "width": 3072, "game_id": 0, "move_id": 4, "id": 4}]}
+{
+    "info": {
+      "description": "Test Dataset",
+      "version": "1.0",
+      "year": 2025,
+      "date_created": "19/03/2025",
+      "author": "Matheus Bissacot"
+    },
+    "images": [
+      {"file_name": "G000_IMG062.jpg", "path": "images/G000_IMG062.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 0, "id": 0},
+      {"file_name": "G000_IMG087.jpg", "path": "images/G000_IMG087.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 1, "id": 1},
+      {"file_name": "G000_IMG102.jpg", "path": "images/G000_IMG102.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 2, "id": 2},
+      {"file_name": "G006_IMG048.jpg", "path": "images/G006_IMG048.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 3, "id": 3},
+      {"file_name": "G006_IMG086.jpg", "path": "images/G006_IMG086.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 4, "id": 4},
+      {"file_name": "G006_IMG119.jpg", "path": "images/G006_IMG119.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 5, "id": 5},
+      {"file_name": "G019_IMG082.jpg", "path": "images/G019_IMG082.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 6, "id": 6},
+      {"file_name": "G028_IMG015.jpg", "path": "images/G028_IMG015.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 7, "id": 7},
+      {"file_name": "G028_IMG062.jpg", "path": "images/G028_IMG062.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 8, "id": 8},
+      {"file_name": "G028_IMG098.jpg", "path": "images/G028_IMG098.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 9, "id": 9},
+      {"file_name": "G028_IMG101.jpg", "path": "images/G028_IMG101.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 10, "id": 10},
+      {"file_name": "G033_IMG043.jpg", "path": "images/G033_IMG043.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 11, "id": 11},
+      {"file_name": "G033_IMG075.jpg", "path": "images/G033_IMG075.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 12, "id": 12},
+      {"file_name": "G033_IMG088.jpg", "path": "images/G033_IMG088.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 13, "id": 13},
+      {"file_name": "G033_IMG101.jpg", "path": "images/G033_IMG101.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 14, "id": 14},
+      {"file_name": "G038_IMG074.jpg", "path": "images/G038_IMG074.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 15, "id": 15},
+      {"file_name": "G038_IMG088.jpg", "path": "images/G038_IMG088.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 16, "id": 16},
+      {"file_name": "G038_IMG103.jpg", "path": "images/G038_IMG103.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 17, "id": 17},
+      {"file_name": "G038_IMG105.jpg", "path": "images/G038_IMG105.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 18, "id": 18},
+      {"file_name": "G041_IMG042.jpg", "path": "images/G041_IMG042.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 19, "id": 19},
+      {"file_name": "G041_IMG048.jpg", "path": "images/G041_IMG048.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 20, "id": 20},
+      {"file_name": "G041_IMG088.jpg", "path": "images/G041_IMG088.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 21, "id": 21},
+      {"file_name": "G041_IMG098.jpg", "path": "images/G041_IMG098.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 22, "id": 22},
+      {"file_name": "G091_IMG102.jpg", "path": "images/G091_IMG102.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 48, "id": 48},
+      {"file_name": "G099_IMG094.jpg", "path": "images/G099_IMG094.jpg", "camera": "Unknown", "height": 3072, "width": 3072, "game_id": 0, "move_id": 49, "id": 49}
+    ]
+  }
+  
