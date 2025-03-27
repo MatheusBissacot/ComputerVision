@@ -62,7 +62,7 @@ def transform_image(img):
     img_dilation_2 = cv2.dilate(img_dilation, kernel, iterations=1) 
     plt.imshow(img_dilation_2,cmap="gray")
 
-    # identify_chessboard(img_dilation_2)
+    # identify_chessboard(img_dilation_2, canny)
 
     plt.show()
 
@@ -71,9 +71,9 @@ def transform_image(img):
 
 
 
-def identify_chessboard(img):    
+def identify_chessboard(img, canny):    
     # find contours --> img_dilation_2
-    board_contours, hierarchy = cv2.findContours(img_dilation_2, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    board_contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     square_centers=list()
 
