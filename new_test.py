@@ -443,6 +443,6 @@ print(board)
 detected_pieces = prespective_to_original(H, pos) #Falta colocar apenas nos quadrados que tem peça e colocar no formato pedido
 #print(detected_pieces)
 
-detected_pieces = 0 
+detected_pieces = 0 #Remover isto
 #Criar output no formato json pedido
 json_output(all_paths[0], number_pieces, board, detected_pieces)
