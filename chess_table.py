@@ -526,6 +526,59 @@ def detect_pieces(warped, positions=None, margin=50):
 
 """
 Description:
+    Identifies the darkest corner of an image by analyzing the average intensity of its four corners.
+Parameters:
+    image (numpy.ndarray): The input image in BGR format.
+    margin (int, optional): The size of the square region to consider for each corner. Defaults to 100.
+Returns:
+    str: The name of the darkest corner ('top_left', 'top_right', 'bottom_right', or 'bottom_left').
+"""
+def find_darkest_corner(image, margin=100):
+    h, w = image.shape[:2]
+
+    # Extract the 4 corners of the image
+    corners = {
+        'top_left': image[0:margin, 0:margin],
+        'top_right': image[0:margin, w-margin:w],
+        'bottom_right': image[h-margin:h, w-margin:w],
+        'bottom_left': image[h-margin:h, 0:margin]
+    }
+
+    # Calculate the average intensity in grayscale
+    averages = {
+        name: np.mean(cv2.cvtColor(corner, cv2.COLOR_BGR2GRAY))
+        for name, corner in corners.items()
+    }
+
+    # Return the darkest corner
+    return min(averages, key=averages.get)
+
+"""
+Description:
+    Rotates an image so that the specified corner becomes the bottom-left corner.
+Parameters:
+    image (numpy.ndarray): The input image to be rotated.
+    origin_corner (str): The current position of the corner to be moved to the bottom-left. 
+                            Accepted values are 'top_left', 'top_right', 'bottom_right', or 'bottom_left'.
+Returns:
+    numpy.ndarray: The rotated image with the specified corner moved to the bottom-left.
+"""
+def rotate_to_bottom_left(image, origin_corner):
+    if origin_corner == 'top_left':
+        # 90° counterclockwise
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    elif origin_corner == 'top_right':
+        # 180°
+        return cv2.rotate(image, cv2.ROTATE_180)
+    elif origin_corner == 'bottom_right':
+        # 90° clockwise
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    else:
+        # Already in the bottom left corner
+        return image
+
+"""
+Description:
     Creates a JSON output file containing the results of the chessboard analysis, including the number of pieces, 
     the board matrix, and the positions of detected pieces.
 
@@ -560,9 +613,11 @@ def main(input_file):
     try:
         all_paths = json_to_path(input_file)
         black_image, image = transform_image(all_paths[8])
+        black_image2, image2 = transform_image(warped)
         rect = find_board_contour(black_image)
         warped, H = transform_perspective(rect)
-        black_image2, image2 = transform_image(warped)
+        darkest_corner = find_darkest_corner(warped)
+        corrected_image = rotate_to_bottom_left(warped, darkest_corner)
 
         # Check if there is a piece in each position of the chessboard
         board, number_pieces = detect_pieces(warped)
