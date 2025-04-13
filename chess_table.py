@@ -124,7 +124,7 @@ def transform_image(img):
     canny = cv2.Canny(otsu_clean,100,255)
 
     # Dilation
-    kernel = np.ones((7, 7), np.uint8) 
+    kernel = np.ones((3, 3), np.uint8) 
     img_dilation = cv2.dilate(canny, kernel, iterations=1) 
 
     # Hough Lines
@@ -142,9 +142,9 @@ def transform_image(img):
 
     # Dilation
     kernel = np.ones((3, 3), np.uint8)
-    black_image = cv2.dilate(black_image, kernel, iterations=1)
+    black_image = cv2.dilate(black_image, kernel, iterations=3)
 
-    return black_image, img
+    return black_image, img, otsu_binary
 
 """
 Description:
@@ -157,32 +157,54 @@ Returns:
     numpy.ndarray or None: A 4x2 array of ordered points representing the corners of the detected chessboard 
                            (top-left, top-right, bottom-right, bottom-left). Returns None if no valid contour is found.
 """
-def find_board_contour(binary_image):
-    # Plot the binary image
-    plt.figure(figsize=(10, 10))
-    plt.imshow(binary_image, cmap='gray')
-    plt.title("Piece detection")
-    plt.axis("off")
-    plt.show()
-    
+def find_board_contour(binary_image, otsu_binary):
     # Find countours
     contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+    contour_image = np.zeros_like(binary_image)
+    cv2.drawContours(contour_image, contours, -1, (255), 2)  # Desenha os contornos em branco
+    kernel = np.ones((8,8), np.uint8)
+    closed = cv2.morphologyEx(contour_image, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour_image = np.zeros_like(binary_image)
+    cv2.drawContours(contour_image, contours, -1, (255), 2) 
+
     max_area = 0
     best_cnt = None
+    points = 3
+    while max_area <= 50000:
+        points += 1
+        if points > 8:
+            points = 4
+            # If can't find the board, it makes the image even noisier 
+            kernel_clean = np.ones((4, 4), np.uint8)
+            otsu_clean = cv2.morphologyEx(otsu_binary, cv2.MORPH_OPEN, kernel_clean)
+            canny = cv2.Canny(otsu_clean,100,255)
+            kernel = np.ones((3, 3), np.uint8) 
+            img_dilation = cv2.dilate(canny, kernel, iterations=1) 
+            lines = cv2.HoughLinesP(img_dilation, 1, np.pi / 180, threshold=200, minLineLength=100, maxLineGap=50)
+            black_image2 = np.zeros_like(img_dilation)
+            
+            if lines is not None:
+                for line in lines:
+                    x1, y1, x2, y2 = line[0]
+                    cv2.line(black_image2, (x1, y1), (x2, y2), (255, 255, 255), 2)
+            kernel = np.ones((3, 3), np.uint8) 
+            black_image2 = cv2.dilate(black_image2, kernel, iterations=3)
+            contours, _ = cv2.findContours(black_image2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 10000:
+                continue
 
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < 10000:
-            continue
-
-        # Contour approximation
-        epsilon = 0.02 * cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-
-        if len(approx) == 4 and area > max_area:
-            max_area = area
-            best_cnt = approx
+            epsilon = 0.05 * cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, epsilon, True)
+            if len(approx) == points and area > max_area and not any(0 in pts for pts in approx):
+                max_area = area
+                best_cnt = approx
+    
+    if len(best_cnt)!=4:
+        best_cnt = cv2.convexHull(best_cnt)
 
     if best_cnt is not None:
         pts = best_cnt.reshape(4, 2)
@@ -205,15 +227,12 @@ def order_points(pts):
     # Orders points in the format: top-left, top-right, bottom-right, bottom-left
     rect = np.zeros((4, 2), dtype="float32")
 
-    s = pts.sum(axis=1)
-    diff = np.diff(pts, axis=1)
+    center = np.mean(pts, axis=0)
+    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
+    sorted_pts = pts[np.argsort(angles)]
+    sorted_pts = sorted_pts.astype("float32")
+    return sorted_pts
 
-    rect[0] = pts[np.argmin(s)]       # top-left
-    rect[2] = pts[np.argmax(s)]       # bottom-right
-    rect[1] = pts[np.argmin(diff)]    # top-right
-    rect[3] = pts[np.argmax(diff)]    # bottom-left
-
-    return rect
 
 """
 Description:
@@ -360,14 +379,6 @@ def validate_squares(black_image, image):
                 p3=sorted_coordinates[num][3]
                 p4=sorted_coordinates[num][2]
                 sorted_coordinates.insert(num+1,[x,y,p1,p2,p3,p4])
-        
-    plt.title("Geometrically possible valid squares on original image \n squares_image")
-    plt.imshow(squares_image,cmap="gray")
-    plt.show()
-
-    plt.title("All squares \n all_contours_image")
-    plt.imshow(all_contours_image,cmap="gray")
-    plt.show()
 
     return sorted_coordinates
 
@@ -382,7 +393,7 @@ Parameters:
 Returns:
     tuple: A tuple containing the warped image (numpy.ndarray) and the homography matrix (numpy.ndarray).
 """
-def transform_perspective(rect):
+def transform_perspective(rect, image):
     if rect is not None:  
         width, height = 800, 800  # Final size of the board
         dst = np.array([
@@ -415,14 +426,74 @@ def perspective_to_original(H, positions):
     original_positions = []
 
     for pos in positions:
-        pos = pos[2:]
-        pos = np.array(pos, dtype=np.float32)
-        pos = pos.reshape(1, -1, 2)
-        transformed = cv2.perspectiveTransform(pos, H_inv)
-        original_positions.append(transformed)
+        if pos is not None:
+            pos = np.array(pos, dtype=np.float32)
+            pos = (pos[0], pos[1], pos[0]+pos[2], pos[1]+pos[3])
+            pos = pos + np.array([50, 50, 50, 50])
+            x_min, y_min, x_max, y_max = pos
+            points = np.array([
+                [x_min, y_min],
+                [x_max, y_min],
+                [x_max, y_max],
+                [x_min, y_max]
+            ], dtype=np.float32).reshape(1, -1, 2)
+            transformed_points = cv2.perspectiveTransform(points, H_inv)
+            xs = transformed_points[0][:, 0]
+            ys = transformed_points[0][:, 1]
+            new_box = (min(xs), min(ys), max(xs), max(ys))
+            original_positions.append(new_box)
 
     return original_positions
 
+"""
+Description:
+    Detects white and black regions/pieces in an image based on color thresholds and returns the bounding boxes
+    around those regions. It applies a margin crop, replaces colors for visualization, and draws contours 
+    and bounding boxes on the image.
+
+Parameters:
+    img (numpy.ndarray): The input image in BGR format to be processed.
+
+Returns:
+    list: A list of bounding boxes (x, y, w, h) for detected regions where:
+        - x, y represent the top-left corner of the bounding box.
+        - w, h represent the width and height of the bounding box.
+"""
+def all_bounding_boxes_2(img, warped):
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    margin = 50
+    h, w = warped.shape[:2]
+
+    img = warped[margin:h - margin, margin:w - margin]
+
+    white_lower = np.array([40, 70, 100])
+    white_upper = np.array([150, 190, 210])
+
+    black_lower = np.array([0, 0, 0])
+    black_upper = np.array([30, 30, 30])
+
+    white_mask = cv2.inRange(img, white_lower, white_upper)
+    black_mask = cv2.inRange(img, black_lower, black_upper)
+
+    img[white_mask > 0] = [255, 0, 0]
+    img[black_mask > 0] = [0, 0, 255]
+
+    masks = [white_mask, black_mask]
+    bounding_boxes = []
+
+    for mask in masks:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        contour_image = np.zeros_like(img)
+        cv2.drawContours(contour_image, contours, -1, (255), 2)
+
+        for cnt in contours:
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            if bw * bh > 2000:
+                bounding_boxes.append((x, y, bw, bh))
+                cv2.rectangle(img, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
+
+    return bounding_boxes
 
 """
 Description:
@@ -479,6 +550,7 @@ def detect_pieces(warped, positions=None, margin=50):
     offset_h = int((1 - inner_scale) / 2 * cell_h)
     offset_w = int((1 - inner_scale) / 2 * cell_w)
     pieces = 0
+    boxes_chess = []
 
     # Convert ROI to RGB for visualization
     roi_rgb = cv2.cvtColor(roi.copy(), cv2.COLOR_BGR2RGB)
@@ -492,6 +564,11 @@ def detect_pieces(warped, positions=None, margin=50):
             cy2 = y2 - offset_h
             cx1 = x1 + offset_w
             cx2 = x2 - offset_w
+
+            # Center point (relative to the ROI)
+            center_x = (cx1 + cx2) / 2
+            center_y = (cy1 + cy2) / 2
+            boxes_chess.append((center_x, center_y))
 
             # Draw grid cell being analyzed
             cv2.rectangle(roi_rgb, (cx1, cy1), (cx2, cy2), (255, 0, 0), 2)
@@ -509,20 +586,7 @@ def detect_pieces(warped, positions=None, margin=50):
                 board_matrix[row, col] = 1
                 pieces += 1
 
-    # Show processed ROI with white pixel counts
-    plt.figure(figsize=(10, 10))
-    plt.imshow(roi_rgb)
-    plt.title("White Pixel Counts in Grid Cells")
-    plt.axis("off")
-    plt.show()
-
-    plt.figure(figsize=(10, 10))
-    plt.imshow(morph, cmap='gray')
-    plt.title("Enhanced Piece Detection (Dilated Edges)")
-    plt.axis("off")
-    plt.show()
-
-    return board_matrix, pieces
+    return board_matrix, pieces, boxes_chess
 
 """
 Description:
@@ -563,19 +627,83 @@ Parameters:
 Returns:
     numpy.ndarray: The rotated image with the specified corner moved to the bottom-left.
 """
-def rotate_to_bottom_left(image, origin_corner):
+def rotate_to_bottom_left(image, matrix, origin_corner):
     if origin_corner == 'top_left':
         # 90° counterclockwise
-        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return [list(row) for row in zip(*matrix)][::-1], cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
     elif origin_corner == 'top_right':
         # 180°
-        return cv2.rotate(image, cv2.ROTATE_180)
+        return [row[::-1] for row in matrix[::-1]], cv2.rotate(image, cv2.ROTATE_180)
     elif origin_corner == 'bottom_right':
         # 90° clockwise
-        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+        return [list(row)[::-1] for row in zip(*matrix)], cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
     else:
         # Already in the bottom left corner
-        return image
+        return matrix, image
+    
+"""
+Description:
+    Finds the largest bounding box (by area) from a list that contains a given point.
+
+Parameters:
+    point (tuple): A tuple (px, py) representing the point to check.
+    bounding_boxes (list): A list of bounding boxes (x, y, w, h).
+
+Returns:
+    tuple or None: The bounding box (x, y, w, h) that contains the point and has the largest area.
+                    Returns None if no bounding box contains the point.
+"""
+def find_largest_bounding_box_containing_point(point, bounding_boxes):
+    px, py = point
+    largest_area = 0
+    best_box = None
+    for x, y, w, h in bounding_boxes:
+        if x <= px <= x + w and y <= py <= y + h:
+            area = w * h
+            if area > largest_area:
+                largest_area = area
+                best_box = (x, y, w, h)
+    return best_box
+
+"""
+Description:
+    Associates detected pieces on a board matrix with the best matching bounding boxes based on 
+    proximity to known square centers. Each piece's location is matched to the largest bounding box 
+    that contains its center point.
+
+Parameters:
+    board (numpy.ndarray): An 8x8 matrix with 1s indicating the presence of pieces and 0s otherwise.
+    all_boxes (list): A list of candidate bounding boxes (x, y, w, h).
+    boxes_chess (list): A list of center points (x, y) for each square on the board, ordered row-wise.
+
+Returns:
+    list: A list of selected bounding boxes (x, y, w, h) corresponding to detected pieces.
+            Boxes are removed from the input list as they are matched.
+"""
+def detected_boxes(board, all_boxes, boxes_chess):
+    best_box = []
+    for i in range(len(board)):
+        for j in range(len(board)):
+            if board[i][j] == 1:
+                best_box.append(find_largest_bounding_box_containing_point(boxes_chess[i*8+j], all_boxes))
+                if best_box[-1] != None:
+                    all_boxes.remove(best_box[-1])
+    return best_box
+
+"""
+Converts bounding boxes from (xmin, ymin, xmax, ymax) tuples to dictionary format.
+
+Parameters:
+    boxes (list): A list of bounding boxes in (xmin, ymin, xmax, ymax) format.
+
+Returns:
+    list: A list of dictionaries with keys 'xmin', 'ymin', 'xmax', 'ymax'.
+"""
+def convert_to_dict_format(boxes):
+    return [
+        {"xmin": float(x1), "ymin": float(y1), "xmax": float(x2), "ymax": float(y2)}
+        for (x1, y1, x2, y2) in boxes
+    ]
 
 """
 Description:
@@ -592,40 +720,61 @@ Returns:
     None
 """
 def json_output(input_image, number_pieces, board, detected_pieces):
-    # Initial data structure
-    data = [
-        {
-            "image": input_image,
-            "num_pieces": number_pieces,
-            "board": board,
-            "detected_pieces": detected_pieces
-        }
-    ]
-    
-    # Save in file (optional)
-    with open('output.json', 'w') as file:
-        json.dump(data, file)
+    new_data = {
+        "image": input_image,
+        "num_pieces": number_pieces,
+        "board": board,
+        "detected_pieces": detected_pieces
+    }
 
+    file_path = 'output.json'
+    
+    # Load existing content if the file exists
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as file:
+            try:
+                data = json.load(file)
+            except json.JSONDecodeError:
+                data = []
+    else:
+        data = []
+
+    # Append new data
+    data.append(new_data)
+
+    # Write everything back to the file
+    with open(file_path, 'w') as file:
+        json.dump(data, file, indent=2)
 
 
 # Main logic
 def main(input_file):
     try:
         all_paths = json_to_path(input_file)
-        black_image, image = transform_image(all_paths[8])
-        black_image2, image2 = transform_image(warped)
-        rect = find_board_contour(black_image)
-        warped, H = transform_perspective(rect)
-        darkest_corner = find_darkest_corner(warped)
-        corrected_image = rotate_to_bottom_left(warped, darkest_corner)
 
-        # Check if there is a piece in each position of the chessboard
-        board, number_pieces = detect_pieces(warped)
-        board = board.tolist()
+        for path in all_paths:
 
-        # Create output in the requested JSON format
-        json_output(all_paths[0], number_pieces, board, number_pieces)
-        
+            # Transform image to detect the board
+            black_image, image, otsu_binary = transform_image(path)
+            # Find the board contour 
+            rect = find_board_contour(black_image, otsu_binary)
+            # Applies a perspective transformation to warp the detected chessboard region into a top-down view. 
+            warped, H = transform_perspective(rect, image)
+            # Find all boxes for possibel pieces
+            all_boxes = all_bounding_boxes_2(warped, warped)
+            # Check if there is a piece in each position of the chessboard
+            board, number_pieces, boxes_chess = detect_pieces(warped)
+            board = board.tolist()
+            # With the all_boxes and the board pieces list identify the right boxes        
+            best = detected_boxes(board, all_boxes, boxes_chess)
+            # Transform the positions to original image 
+            detected_pieces = perspective_to_original(H, best)
+            detected_pieces = convert_to_dict_format(detected_pieces)
+            # Find the inicial corner and rotate the image and the board list
+            darkest_corner = find_darkest_corner(warped)
+            board, corrected_image  = rotate_to_bottom_left(warped, board, darkest_corner)
+            # Create output in the requested JSON format
+            json_output(path, number_pieces, board, detected_pieces)
     except FileNotFoundError:
         print(f"Error: The file '{input_file}' was not found.")
         sys.exit(1)
