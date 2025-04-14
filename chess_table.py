@@ -41,13 +41,6 @@ import matplotlib.pyplot as plt
 import math
 
 
-# Directory variables
-outputDir = './output_images/' 
-
-# Create output directory
-if not os.path.exists(outputDir):
-    os.makedirs(outputDir)
-
 # Methods
 
 """
