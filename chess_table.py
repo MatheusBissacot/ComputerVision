@@ -553,7 +553,7 @@ def detect_pieces(warped, positions=None, margin=50):
     boxes_chess = []
 
     # Convert ROI to RGB for visualization
-    roi_rgb = cv2.cvtColor(roi.copy(), cv2.COLOR_BGR2RGB)
+    roi_rgb = roi.copy()
 
     for row in range(8):
         for col in range(8):
