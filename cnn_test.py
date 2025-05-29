@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, models
+import torch.nn.functional as F
 
 # ---------- Config ----------
 JSON_PATH = "annotations.json"
@@ -56,6 +57,30 @@ transform = transforms.Compose([
                          std=[0.229, 0.224, 0.225])
 ])
 
+# ---------- CNN from Scratch ----------
+class BaselineCNN(nn.Module):
+    def __init__(self):
+        super(BaselineCNN, self).__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=1, padding=2)  # 224x224 → 112x112
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)                  # Downsampling
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1) # 112x112 → 56x56
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1) # 56x56 → 28x28
+
+        self.fc1 = nn.Linear(64 * 28 * 28, 256)
+        self.fc2 = nn.Linear(256, 64)
+        self.out = nn.Linear(64, 1)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))  # (B, 16, 112, 112)
+        x = self.pool(F.relu(self.conv2(x)))  # (B, 32, 56, 56)
+        x = self.pool(F.relu(self.conv3(x)))  # (B, 64, 28, 28)
+        x = x.view(x.size(0), -1)             # Flatten
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.out(x)                       # Output: (B, 1)
+        return x
+
+
 # ---------- Model ----------
 def get_model(model_name="resnet18"):
     if model_name == "resnet18":
@@ -66,10 +91,18 @@ def get_model(model_name="resnet18"):
         model = models.vgg16(pretrained=True)
         model.classifier[6] = nn.Linear(4096, 1)
 
+    elif model_name == "baseline":
+        model = BaselineCNN()
+
+    elif model_name == "efficientnet_b0":
+        model = models.efficientnet_b0(pretrained=True)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 1)
+
     else:
-        raise ValueError(f"Unsupported model: {model_name}. Choose 'resnet18' or 'vgg16'.")
+        raise ValueError(f"Unsupported model: {model_name}")
 
     return model
+
 
 
 # ---------- Train ----------
