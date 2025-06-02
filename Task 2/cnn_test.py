@@ -6,10 +6,12 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, models
 import torch.nn.functional as F
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import numpy as np
+from tqdm import tqdm
 
 # ---------- Config ----------
 JSON_PATH = "annotations.json"
-IMAGE_ROOT = "."  # Adjust if images are nested
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMG_SIZE = 224
 BATCH_SIZE = 32
@@ -18,12 +20,11 @@ LR = 1e-4
 
 # ---------- Dataset Class ----------
 class ChessPieceCountDataset(Dataset):
-    def __init__(self, json_path, split='train', transform=None, image_root=''):
+    def __init__(self, json_path, split, transform=None):
         with open(json_path, 'r') as f:
             self.data = json.load(f)
 
         self.transform = transform
-        self.image_root = image_root
         self.image_ids = self.data['splits'][split]['image_ids']
         self.image_dict = {img['id']: img for img in self.data['images']}
 
@@ -35,7 +36,7 @@ class ChessPieceCountDataset(Dataset):
         self.samples = []
         for img_id in self.image_ids:
             img_meta = self.image_dict[img_id]
-            file_path = os.path.join(image_root, 'chessred', img_meta['path'])
+            file_path = os.path.join('chessred', img_meta['path'])
             count = self.count_map.get(img_id, 0)
             self.samples.append((file_path, count))
 
@@ -52,6 +53,8 @@ class ChessPieceCountDataset(Dataset):
 # ---------- Transforms ----------
 transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
                          std=[0.229, 0.224, 0.225])
@@ -106,48 +109,88 @@ def get_model(model_name="resnet18"):
 
 
 # ---------- Train ----------
-def train(model, train_loader, val_loader):
+def train(model, train_loader, val_loader, patience=5):
     model = model.to(DEVICE)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
+    best_val_loss = float('inf')
+    patience_counter = 0
+
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0
-        for imgs, targets in train_loader:
+
+        # Training loop
+        loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}", leave=False)
+        for imgs, targets in loop:
             imgs, targets = imgs.to(DEVICE), targets.to(DEVICE)
             preds = model(imgs)
             loss = criterion(preds, targets)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             total_loss += loss.item()
+            loop.set_postfix(loss=total_loss / (loop.n + 1))
 
-        print(f"[Epoch {epoch+1}] Loss: {total_loss / len(train_loader):.4f}")
+        print(f"[Epoch {epoch+1}] Training Loss: {total_loss / len(train_loader):.4f}")
 
+        # Validation loop
         if val_loader:
-            evaluate(model, val_loader)
+            val_loss = 0
+            model.eval()
+            with torch.no_grad():
+                for imgs, targets in val_loader:
+                    imgs, targets = imgs.to(DEVICE), targets.to(DEVICE)
+                    preds = model(imgs)
+                    loss = criterion(preds, targets)
+                    val_loss += loss.item()
 
-    torch.save(model.state_dict(), "model.pth")
+            val_loss /= len(val_loader)
+            print(f"[Epoch {epoch+1}] Validation Loss: {val_loss:.4f}")
+
+            # Check for early stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                torch.save(model.state_dict(), "best_model_effcicient.pth")
+                print(f"Best model saved with Validation Loss: {val_loss:.4f}")
+            else:
+                patience_counter += 1
+                print(f"Patience counter: {patience_counter}/{patience}")
+
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
+
+    
 
 # ---------- Evaluate ----------
-def evaluate(model, loader):
-    from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
+
+def accuracy_with_tolerance(y_true, y_pred, tolerance=1):
+    correct = sum(abs(true - pred) <= tolerance for true, pred in zip(y_true, y_pred))
+    return correct / len(y_true)
+
+
+def evaluate(model, loader, tolerance=1):
 
     model.eval()
     y_true, y_pred = [], []
 
     with torch.no_grad():
-        for imgs, targets in loader:
+        for imgs, targets in tqdm(loader, desc="Evaluating", leave=False):
             imgs = imgs.to(DEVICE)
             outputs = model(imgs).cpu().numpy().flatten()
             y_pred.extend(outputs)
             y_true.extend(targets.numpy().flatten())
 
     mae = mean_absolute_error(y_true, y_pred)
-    rmse = root_mean_squared_error(y_true, y_pred, squared=False)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
-    print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.2f}")
+    accuracy = accuracy_with_tolerance(y_true, y_pred, tolerance)
+
+    print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.2f} | Accuracy (±{tolerance}): {accuracy:.2%}")
 
 # ---------- Predict ----------
 def predict(image_path, model_path="model.pth"):
@@ -160,30 +203,34 @@ def predict(image_path, model_path="model.pth"):
 
     with torch.no_grad():
         output = model(image)
-    count = output.item()
+    #count = output.item()
+    count = max(0.0, float(output))
     print(f"Predicted piece count: {count:.2f}")
     return count
 
 # ---------- Main ----------
 if __name__ == "__main__":
     # Load datasets
-    train_set = ChessPieceCountDataset(JSON_PATH, split='train', transform=transform, image_root=IMAGE_ROOT)
-    val_set = ChessPieceCountDataset(JSON_PATH, split='val', transform=transform, image_root=IMAGE_ROOT)
-    test_set = ChessPieceCountDataset(JSON_PATH, split='test', transform=transform, image_root=IMAGE_ROOT)
+    train_set = ChessPieceCountDataset(JSON_PATH, split='train', transform=transform)
+    val_set = ChessPieceCountDataset(JSON_PATH, split='val', transform=transform)
+    test_set = ChessPieceCountDataset(JSON_PATH, split='test', transform=transform)
 
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=BATCH_SIZE)
     test_loader = DataLoader(test_set, batch_size=BATCH_SIZE)
 
     # Train and evaluate
-    # # Training with Resnet18
-    # model = get_model("resnet18")
+    # Training with Resnet18
+    #model = get_model("resnet18")
     # Training with VGG16
-    model = get_model("vgg16")
-    train(model, train_loader, val_loader)
+    #model = get_model("vgg16")
+    model = get_model("efficientnet_b0")
+    #train(model, train_loader, val_loader)
 
     # Final evaluation on test set
-    print("Test evaluation:")
+    model.to(DEVICE)
+    model.load_state_dict(torch.load("best_model_effcicient.pth"))
+    #print("Test evaluation:")
     evaluate(model, test_loader)
 
     # Example prediction
