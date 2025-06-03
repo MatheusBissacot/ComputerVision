@@ -61,26 +61,47 @@ transform = transforms.Compose([
 ])
 
 # ---------- CNN from Scratch ----------
-class BaselineCNN(nn.Module):
+class CNN(nn.Module):
     def __init__(self):
-        super(BaselineCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=1, padding=2)  # 224x224 → 112x112
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)                  # Downsampling
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1) # 112x112 → 56x56
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1) # 56x56 → 28x28
-
-        self.fc1 = nn.Linear(64 * 28 * 28, 256)
-        self.fc2 = nn.Linear(256, 64)
-        self.out = nn.Linear(64, 1)
+        super(CNN, self).__init__()
+        
+        # Convolutional Block 1
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)  # Input: 224x224 → Output: 224x224
+        self.bn1 = nn.BatchNorm2d(32)
+        
+        # Convolutional Block 2
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)  # Output: 224x224
+        self.bn2 = nn.BatchNorm2d(64)
+        
+        # Convolutional Block 3
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)  # Output: 112x112
+        self.bn3 = nn.BatchNorm2d(128)
+        
+        # Pooling
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)  # Downsampling: Halves dimensions
+        
+        # Fully Connected Layers
+        self.fc1 = nn.Linear(128 * 28 * 28, 512)
+        self.fc2 = nn.Linear(512, 128)
+        self.out = nn.Linear(128, 1)
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))  # (B, 16, 112, 112)
-        x = self.pool(F.relu(self.conv2(x)))  # (B, 32, 56, 56)
-        x = self.pool(F.relu(self.conv3(x)))  # (B, 64, 28, 28)
-        x = x.view(x.size(0), -1)             # Flatten
+        # Convolutional Block 1
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))  # (B, 32, 112, 112)
+        
+        # Convolutional Block 2
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))  # (B, 64, 56, 56)
+        
+        # Convolutional Block 3
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))  # (B, 128, 28, 28)
+        
+        # Flatten
+        x = x.view(x.size(0), -1)  # (B, 128 * 28 * 28)
+        
+        # Fully Connected Layers
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = self.out(x)                       # Output: (B, 1)
+        x = self.out(x)  # Output: (B, 1)
         return x
 
 
@@ -100,6 +121,26 @@ def get_model(model_name="resnet18"):
     elif model_name == "efficientnet_b0":
         model = models.efficientnet_b0(pretrained=True)
         model.classifier[1] = nn.Linear(model.classifier[1].in_features, 1)
+        
+    elif model_name == "vgg19":
+        model = models.vgg19(pretrained=True)
+        model.classifier[6] = nn.Linear(4096, 1)
+        
+    elif model_name == "vgg19_bn":
+        model = models.vgg19_bn(pretrained=True)
+        model.classifier[6] = nn.Linear(4096, 1)
+    
+    elif model_name == "resnet34":
+        model = models.resnet34(pretrained=True)
+        model.fc = nn.Linear(model.fc.in_features, 1)
+    
+    elif model_name == "efficientnet_b2":
+        model = models.efficientnet_b2(pretrained=True)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 1)
+        
+    elif model_name == "convnext_tiny":
+        model = models.convnext_tiny(pretrained=True)
+        model.classifier[2] = nn.Linear(model.classifier[2].in_features, 1)
 
     else:
         raise ValueError(f"Unsupported model: {model_name}")
@@ -141,7 +182,7 @@ def train(model, train_loader, val_loader, patience=5):
             val_loss = 0
             model.eval()
             with torch.no_grad():
-                for imgs, targets in val_loader:
+                for imgs, targets in tqdm(val_loader, desc="Validating", leave=False):
                     imgs, targets = imgs.to(DEVICE), targets.to(DEVICE)
                     preds = model(imgs)
                     loss = criterion(preds, targets)
@@ -154,7 +195,7 @@ def train(model, train_loader, val_loader, patience=5):
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                torch.save(model.state_dict(), "best_model_effcicient.pth")
+                torch.save(model.state_dict(), "best_model_scratch.pth")
                 print(f"Best model saved with Validation Loss: {val_loss:.4f}")
             else:
                 patience_counter += 1
@@ -188,9 +229,10 @@ def evaluate(model, loader, tolerance=1):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
-    accuracy = accuracy_with_tolerance(y_true, y_pred, tolerance)
+    accuracy_tol = accuracy_with_tolerance(y_true, y_pred, tolerance)
+    accuracy = np.mean(np.array(y_true) == np.round(y_pred))
 
-    print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.2f} | Accuracy (±{tolerance}): {accuracy:.2%}")
+    print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.2f} | Accuracy (±{tolerance}): {accuracy_tol:.2%} | Accuracy: {accuracy:.2%}")
 
 # ---------- Predict ----------
 def predict(image_path, model_path="model.pth"):
@@ -209,6 +251,18 @@ def predict(image_path, model_path="model.pth"):
     return count
 
 # ---------- Main ----------
+
+#usar no efficient net b2
+transform_b2 = transforms.Compose([
+    transforms.Resize((260, 260)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
+
 if __name__ == "__main__":
     # Load datasets
     train_set = ChessPieceCountDataset(JSON_PATH, split='train', transform=transform)
@@ -221,15 +275,17 @@ if __name__ == "__main__":
 
     # Train and evaluate
     # Training with Resnet18
-    #model = get_model("resnet18")
+    #model = get_model("efficientnet_b2")
     # Training with VGG16
+    #model = get_model("resnet34")
     #model = get_model("vgg16")
-    model = get_model("efficientnet_b0")
-    #train(model, train_loader, val_loader)
+    model = CNN()
+    train(model, train_loader, val_loader)
 
     # Final evaluation on test set
+    
+    model.load_state_dict(torch.load("best_model_scratch.pth"))
     model.to(DEVICE)
-    model.load_state_dict(torch.load("best_model_effcicient.pth"))
     #print("Test evaluation:")
     evaluate(model, test_loader)
 
