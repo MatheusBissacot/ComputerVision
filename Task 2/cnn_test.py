@@ -17,6 +17,8 @@ IMG_SIZE = 224
 BATCH_SIZE = 32
 EPOCHS = 20
 LR = 1e-4
+TASK_TYPE = "classification"  # "classification" 
+MAX_PIECES = 33  # 0 to 32 pieces
 
 # ---------- Dataset Class ----------
 class ChessPieceCountDataset(Dataset):
@@ -48,7 +50,13 @@ class ChessPieceCountDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         if self.transform:
             image = self.transform(image)
-        return image, torch.tensor([count], dtype=torch.float32)
+            
+        if TASK_TYPE == "regression":
+            target = torch.tensor([count], dtype=torch.float32)
+        else:
+            target = torch.tensor(count, dtype=torch.long)
+        
+        return image, target
 
 # ---------- Transforms ----------
 transform = transforms.Compose([
@@ -61,86 +69,97 @@ transform = transforms.Compose([
 ])
 
 # ---------- CNN from Scratch ----------
+    
 class CNN(nn.Module):
     def __init__(self):
         super(CNN, self).__init__()
-        
+
         # Convolutional Block 1
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)  # Input: 224x224 → Output: 224x224
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
-        
+
         # Convolutional Block 2
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)  # Output: 224x224
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
         self.bn2 = nn.BatchNorm2d(64)
-        
+
         # Convolutional Block 3
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)  # Output: 112x112
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
         self.bn3 = nn.BatchNorm2d(128)
-        
+
         # Pooling
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)  # Downsampling: Halves dimensions
-        
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        # Adaptive pooling to ensure compatibility with variable input sizes
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))  # Output: (B, 128, 1, 1)
+
         # Fully Connected Layers
-        self.fc1 = nn.Linear(128 * 28 * 28, 512)
+        self.fc1 = nn.Linear(128, 512)
         self.fc2 = nn.Linear(512, 128)
-        self.out = nn.Linear(128, 1)
+        
+        output_dim = MAX_PIECES if TASK_TYPE == "classification" else 1
+        self.out = nn.Linear(128, output_dim)
 
     def forward(self, x):
-        # Convolutional Block 1
-        x = self.pool(F.relu(self.bn1(self.conv1(x))))  # (B, 32, 112, 112)
-        
-        # Convolutional Block 2
-        x = self.pool(F.relu(self.bn2(self.conv2(x))))  # (B, 64, 56, 56)
-        
-        # Convolutional Block 3
-        x = self.pool(F.relu(self.bn3(self.conv3(x))))  # (B, 128, 28, 28)
-        
-        # Flatten
-        x = x.view(x.size(0), -1)  # (B, 128 * 28 * 28)
-        
-        # Fully Connected Layers
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))  # (B, 32, H/2, W/2)
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))  # (B, 64, H/4, W/4)
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))  # (B, 128, H/8, W/8)
+
+        x = self.global_avg_pool(x)  # (B, 128, 1, 1)
+        x = x.view(x.size(0), -1)    # (B, 128)
+
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = self.out(x)  # Output: (B, 1)
+        x = self.out(x)
         return x
 
 
+
 # ---------- Model ----------
-def get_model(model_name="resnet18"):
+def get_model(model_name):
+    output_dim = MAX_PIECES if TASK_TYPE == "classification" else 1
     if model_name == "resnet18":
         model = models.resnet18(pretrained=True)
-        model.fc = nn.Linear(model.fc.in_features, 1)
+        model.fc = nn.Linear(model.fc.in_features, output_dim)
 
     elif model_name == "vgg16":
         model = models.vgg16(pretrained=True)
-        model.classifier[6] = nn.Linear(4096, 1)
+        model.classifier[6] = nn.Linear(4096, output_dim)
 
     elif model_name == "baseline":
-        model = BaselineCNN()
+        model = CNN()
 
     elif model_name == "efficientnet_b0":
         model = models.efficientnet_b0(pretrained=True)
-        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 1)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, output_dim)
         
     elif model_name == "vgg19":
         model = models.vgg19(pretrained=True)
-        model.classifier[6] = nn.Linear(4096, 1)
+        model.classifier[6] = nn.Linear(4096, output_dim)
+    
+    elif model_name == "vgg19_512":
+        base = models.vgg19(pretrained=True)
+        model = nn.Sequential(
+            base.features,
+            nn.AdaptiveAvgPool2d((1, 1)),  # converte para (B, 512, 1, 1)
+            nn.Flatten(),                 # converte para (B, 512)
+            nn.Linear(512, 1)             # regressão
+        )
         
     elif model_name == "vgg19_bn":
         model = models.vgg19_bn(pretrained=True)
-        model.classifier[6] = nn.Linear(4096, 1)
+        model.classifier[6] = nn.Linear(4096, output_dim)
     
     elif model_name == "resnet34":
         model = models.resnet34(pretrained=True)
-        model.fc = nn.Linear(model.fc.in_features, 1)
+        model.fc = nn.Linear(model.fc.in_features, output_dim)
     
     elif model_name == "efficientnet_b2":
         model = models.efficientnet_b2(pretrained=True)
-        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 1)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, output_dim)
         
     elif model_name == "convnext_tiny":
         model = models.convnext_tiny(pretrained=True)
-        model.classifier[2] = nn.Linear(model.classifier[2].in_features, 1)
+        model.classifier[2] = nn.Linear(model.classifier[2].in_features, output_dim)
 
     else:
         raise ValueError(f"Unsupported model: {model_name}")
@@ -152,7 +171,12 @@ def get_model(model_name="resnet18"):
 # ---------- Train ----------
 def train(model, train_loader, val_loader, patience=5):
     model = model.to(DEVICE)
-    criterion = nn.MSELoss()
+    
+    if TASK_TYPE == "regression":
+        criterion = nn.MSELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
+        
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
     best_val_loss = float('inf')
@@ -167,7 +191,12 @@ def train(model, train_loader, val_loader, patience=5):
         for imgs, targets in loop:
             imgs, targets = imgs.to(DEVICE), targets.to(DEVICE)
             preds = model(imgs)
-            loss = criterion(preds, targets)
+            
+            if TASK_TYPE == "classification":
+                loss = criterion(preds, targets)
+            else:
+                loss = criterion(preds, targets)
+                
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -195,7 +224,7 @@ def train(model, train_loader, val_loader, patience=5):
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                torch.save(model.state_dict(), "best_model_scratch.pth")
+                torch.save(model.state_dict(), "best_model_vgg19_classi.pth")
                 print(f"Best model saved with Validation Loss: {val_loss:.4f}")
             else:
                 patience_counter += 1
@@ -222,45 +251,56 @@ def evaluate(model, loader, tolerance=1):
     with torch.no_grad():
         for imgs, targets in tqdm(loader, desc="Evaluating", leave=False):
             imgs = imgs.to(DEVICE)
-            outputs = model(imgs).cpu().numpy().flatten()
-            y_pred.extend(outputs)
-            y_true.extend(targets.numpy().flatten())
-
+            outputs = model(imgs)
+            
+            if TASK_TYPE == "classification":
+                preds = outputs.argmax(dim=1).cpu().numpy()
+                true_vals = targets.numpy()
+            else:
+                preds = outputs.cpu().numpy().flatten()
+                true_vals = targets.numpy().flatten()
+                
+            y_pred.extend(preds)
+            y_true.extend(true_vals)
+    
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
-    accuracy_tol = accuracy_with_tolerance(y_true, y_pred, tolerance)
+    accuracy_tol = accuracy_with_tolerance(y_true,  np.round(y_pred), tolerance)
     accuracy = np.mean(np.array(y_true) == np.round(y_pred))
 
     print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.2f} | Accuracy (±{tolerance}): {accuracy_tol:.2%} | Accuracy: {accuracy:.2%}")
 
 # ---------- Predict ----------
-def predict(image_path, model_path="model.pth"):
-    model = get_model()
+def predict(image_path, model_name="convnext_tiny", model_path="best_model_convnext_tiny.pth"):
+    model = get_model(model_name)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model = model.to(DEVICE).eval()
 
+    # Apply same transform used during training
     image = Image.open(image_path).convert("RGB")
-    image = transform(image).unsqueeze(0).to(DEVICE)
+    image = transform(image).unsqueeze(0).to(DEVICE)  # Add batch dimension
 
     with torch.no_grad():
         output = model(image)
-    #count = output.item()
+    
+    # Make sure the count is at least zero (no negative piece counts)
     count = max(0.0, float(output))
-    print(f"Predicted piece count: {count:.2f}")
-    return count
+    count_rounded = round(count)
+    print(f"Predicted piece count: {count:.2f} (rounded: {count_rounded})")
+    return count_rounded
 
 # ---------- Main ----------
 
 #usar no efficient net b2
-transform_b2 = transforms.Compose([
-    transforms.Resize((260, 260)),
-    transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
+#transform_b2 = transforms.Compose([
+#    transforms.Resize((260, 260)),
+#    transforms.RandomHorizontalFlip(),
+#    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+#    transforms.ToTensor(),
+#    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+#                         std=[0.229, 0.224, 0.225])
+#])
 
 
 if __name__ == "__main__":
@@ -274,20 +314,24 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_set, batch_size=BATCH_SIZE)
 
     # Train and evaluate
-    # Training with Resnet18
-    #model = get_model("efficientnet_b2")
-    # Training with VGG16
-    #model = get_model("resnet34")
-    #model = get_model("vgg16")
-    model = CNN()
+    
+    # Training with VGG19
+    model = get_model("vgg19")
+    
+    # Training with Convnext_tiny
+    #model = get_model("convnext_tiny")
+    
+    # Training from scratch
+    #model= get_model("baseline")
+    
     train(model, train_loader, val_loader)
 
     # Final evaluation on test set
     
-    model.load_state_dict(torch.load("best_model_scratch.pth"))
-    model.to(DEVICE)
+    #model.load_state_dict(torch.load("best_model_scratch_1024.pth"))
+    #model.to(DEVICE)
     #print("Test evaluation:")
-    evaluate(model, test_loader)
+    #evaluate(model, test_loader)
 
     # Example prediction
-    # predict("images/0/G000_IMG000.jpg")
+    #predict("G000_IMG000.jpg")
