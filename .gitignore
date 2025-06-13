@@ -5,3 +5,6 @@ VC_2425_Project_public
 output_chessboard
 json_example_task1
 images
+best_model_convnext_tiny_classi.pth
+best_model_vgg19_classi.pth
+best_modified_baseline_classi.pth
