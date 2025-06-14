@@ -10,25 +10,22 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import numpy as np
 from tqdm import tqdm
 import argparse
-import sys
+
 
 # ----------Arguments --------
 parser = argparse.ArgumentParser()
 parser.add_argument("json_path", help="Path to the annotations JSON file")
 
 # Optional arguments for prediction
-parser.add_argument("--model", help="Model name (used for prediction)")
-parser.add_argument("--task", choices=["classification", "regression"], help="Task type")
+parser.add_argument("--model", default= "best")
+parser.add_argument("--task", default="regression")
 
 # Optional argument for training or evaluation
-parser.add_argument("--obj", choices=["train", "test"], help="Objective to run")
+parser.add_argument('--obj', default="test")
 
 args = parser.parse_args()
 
-# Enforce mutually exclusive usage:
-if args.obj and (args.model or args.task):
-    print("Error: --obj cannot be used with --model or --task.")
-    sys.exit(1)
+
 
 # ---------- Config ----------
 JSON_PATH = args.json_path
@@ -73,7 +70,6 @@ class ChessPieceCountDataset(Dataset):
 
             file_path = os.path.join(dataset, img_meta['path'])
 
-            # Verify if the file exists
             if not os.path.exists(file_path):
                 continue
 
@@ -94,21 +90,28 @@ class ChessPieceCountDataset(Dataset):
         if USE_CROP :
             image = self.crop_board(image, img_path)       
             
-        
         if self.transform:
             image = self.transform(image)
             
         if TASK_TYPE == "regression":
             target = torch.tensor([count], dtype=torch.float32)
+            
         else:
             target = torch.tensor(count, dtype=torch.long)
 
-        if self.return_path:
+
+        if self.return_path: # used for the testing phase and output of the json
             return image, target, img_path
         
         return image, target
     
+   
     def crop_board(self, image, img_path):
+        
+        """
+        This function crops the image to keep only the pieces by finding the outermost pieces at the 
+        four corners based on their bounding boxes and cutting a square that contains all the pieces.
+        """
     
         img_id = None
         for img in self.image_dict.values():
@@ -156,6 +159,10 @@ def diff_sizes(size):
 # ---------- CNN from Scratch ----------
     
 class CNN(nn.Module):
+    """
+    The first CNN architecture designed to count the number of pieces consists of three convolutional 
+    blocks with batch normalization and max pooling, followed by global average pooling and fully connected layers.
+    """
     def __init__(self):
         super(CNN, self).__init__()
 
@@ -195,6 +202,12 @@ class CNN(nn.Module):
 # ---------- CNN from Scratch Imp ----------    
 class CNN_imp(nn.Module):
     def __init__(self):
+        """
+        An improved CNN architecture for piece counting, featuring four convolutional blocks with residual (skip) connections, 
+        batch normalization, and max pooling. The network uses global average pooling followed by two fully connected layers with 
+        dropout for regularization.
+        """
+        
         super(CNN_imp, self).__init__()
 
         output_dim = MAX_PIECES if TASK_TYPE == "classification" else 1
@@ -255,6 +268,13 @@ class CNN_imp(nn.Module):
 # ---------- CNN for Yolo ----
 
 class CNNBackbone(nn.Module):
+    """
+    A CNN backbone to be used on our aproximation of the YOLO-style architectures. It consists of 
+    three convolutional layers with batch normalization and ReLU activations, each followed by max pooling to progressively 
+    reduce spatial dimensions. The final feature map is resized to a fixed 7*7 resolution using adaptive average pooling, 
+    making it suitable for downstream detection heads.
+    """
+    
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
@@ -275,6 +295,12 @@ class CNNBackbone(nn.Module):
 # ---------- Yolo Idea ------
 
 class YoloStyleCountModel(nn.Module):
+    """
+    An approximation of the YOLO architecture was developed with the goal of simulating the analysis of cells 
+    in an image, aiming to capture important spatial dependencies and aggregate relevant information. The models 
+    used were selected from the best-performing baselines based on their characteristics and overall performance.
+    """
+    
     def __init__(self, backbone_name, grid_size=7, num_classes=MAX_PIECES):
         super().__init__()
 
@@ -319,6 +345,10 @@ class YoloStyleCountModel(nn.Module):
 # ---------- Model ----------
 
 def get_model(model_name, backbone):
+    """
+    Responsible for selecting the pre-trained model architectures and subsequently fine-tuning them.
+    """
+    
     output_dim = MAX_PIECES if TASK_TYPE == "classification" else 1
     if model_name == "resnet18":
         model = models.resnet18(pretrained=True)
@@ -369,6 +399,11 @@ def get_model(model_name, backbone):
 # ---------- Train ----------
 
 def train(model, train_loader, val_loader, name, patience):
+    """
+    Function responsible for training and validating the models, based on the hard-coded variables
+    defined at the beginning of the file, which determine the specific task or behavior each model should follow.
+    """
+    
     model = model.to(DEVICE)
     
     if TASK_TYPE == "regression":
@@ -472,10 +507,17 @@ def train(model, train_loader, val_loader, name, patience):
 # ---------- Evaluate ----------
 
 def accuracy_with_tolerance(y_true, y_pred, tolerance=1):
+    """
+    Computes accuracy by allowing an error margin of 1 piece, predictions are considered correct if they are off by no more than one.
+    """
     correct = sum(abs(true - pred) <= tolerance for true, pred in zip(y_true, y_pred))
     return correct / len(y_true)
 
 def evaluate(model, loader, tolerance=1):
+    """
+    Computes performance metrics for the models. 
+    
+    """
     model.eval()
     y_true, y_pred = [], []
 
@@ -484,16 +526,11 @@ def evaluate(model, loader, tolerance=1):
             imgs = imgs.to(DEVICE)
             outputs = model(imgs)
             
-            if YOLO_LIKE:
-                if TASK_TYPE == "regression":
-                    outputs = outputs.view(outputs.size(0), -1).sum(dim=1)
-                    preds = outputs.cpu().numpy().flatten()
-                    true_vals = targets.numpy().flatten()
-                else:
-                    preds_classes = outputs.argmax(dim=2)  
-                    preds_sum = preds_classes.sum(dim=1).cpu().numpy() 
-                    preds = preds_sum
-                    true_vals = targets.numpy()
+            if YOLO_LIKE: 
+                outputs = outputs.view(outputs.size(0), -1).sum(dim=1)
+                preds = outputs.cpu().numpy().flatten()
+                true_vals = targets.numpy().flatten()
+
             else:
                 if TASK_TYPE == "classification":
                     preds = outputs.argmax(dim=1).cpu().numpy()
@@ -517,69 +554,21 @@ def evaluate(model, loader, tolerance=1):
 # ---------- Main ----------
 """
 Usage:
-    python cnn_test.py annotations.json [--objective train|test] [--model model_name]
-If --objective is omitted, default prediction will run using the specified model (default: yolo).
+    python piece_detection.py input.json [--obj train|test] [--model model_name]
+If --obj is omitted default prediction will run and if --model is omitted the best model will be use for tests (default: convnext_tiny).
 """
 if __name__ == "__main__":
-    # Load datasets
-    train_set = ChessPieceCountDataset(JSON_PATH, split='train',dataset='chessred', transform=diff_sizes(224))
-    val_set = ChessPieceCountDataset(JSON_PATH, split='val', dataset='chessred', transform=diff_sizes(224))
-    test_set = ChessPieceCountDataset(JSON_PATH, split='test',dataset='chessred', transform=diff_sizes(224))
-
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE)
-    test_loader = DataLoader(test_set, batch_size=BATCH_SIZE)
     
-    if args.obj is None:
-        print(f"No objective specified. Running default prediction with model: {args.model}")
-        model_name = args.model
-
-        # Handle YOLO separately
-        if model_name.startswith("yolo_"):
-            backbone = model_name.replace("yolo_", "")
-            model = get_model("yolo", backbone)
-            model_path = f"{model_name}.pth"
-        else:
-            clean_name = model_name.replace("_classi", "").replace("_regr", "")
-
-            # Choose model path based on TASK_TYPE
-            suffix = "_classi" if TASK_TYPE == "classification" else "_regr"
-            model_path = f"best_model_{clean_name}{suffix}.pth"
-            model = get_model(clean_name, "")
-
-        # Load model
-        model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-        model.to(DEVICE)
-
-        # Evaluate
-        evaluate(model, test_loader)
-
-        # Predict
-        test_set = ChessPieceCountDataset(JSON_PATH, split='test', dataset='chessred', transform=diff_sizes(224), return_path=True)
-        test_loader = DataLoader(test_set, batch_size=BATCH_SIZE)
-
-        results = {}
-        with torch.no_grad():
-            for imgs, _, paths in tqdm(test_loader):
-                imgs = imgs.to(DEVICE)
-                outputs = model(imgs)
-
-                if TASK_TYPE == "classification":
-                    preds = outputs.argmax(dim=1).tolist()
-                else:
-                    preds = outputs.squeeze().tolist()
-                    if isinstance(preds, float):  # single-element batch
-                        preds = [preds]
-
-                for p, path in zip(preds, paths):
-                    results[path] = int(p)  # Round down
-
-        with open("predictions.json", "w") as f:
-            json.dump(results, f, indent=2)
-        print("Predictions saved to predictions.json")
-
 
     if (args.obj == "train"):
+        # Load datasets
+        train_set = ChessPieceCountDataset(JSON_PATH, split='train',dataset='chessred', transform=diff_sizes(224))
+        val_set = ChessPieceCountDataset(JSON_PATH, split='val', dataset='chessred', transform=diff_sizes(224))
+        test_set = ChessPieceCountDataset(JSON_PATH, split='test',dataset='chessred', transform=diff_sizes(224))
+
+        train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_set, batch_size=BATCH_SIZE)
+        test_loader = DataLoader(test_set, batch_size=BATCH_SIZE)
         
         if BASE:
             mods=["vgg19", "convnext_tiny", "Scratch_CNN_imp", "resnet18", "vgg16", "efficientnet_b0", "vgg19_bn", "resnet34"] 
@@ -642,7 +631,7 @@ if __name__ == "__main__":
                     evaluate(model, test_loader)
                 
         if CLASSI:
-            TASK_TYPE = "classification"  # "classification"
+            TASK_TYPE = "classification" 
             backbone=["vgg19", "convnext_tiny", "Scratch_CNN", "Scratch_CNN_imp"]
             # Train
             for name in backbone:
@@ -694,11 +683,52 @@ if __name__ == "__main__":
             # Train
             for name in backbone:
                 model= get_model("yolo",name)
-                train(model, train_loader, val_loader, "yolo_" + name,5) 
+                train(model, train_loader, val_loader, "best_model_yolo_" + name,5) 
                 
                 # Evaluation
-                model.load_state_dict(torch.load("yolo_" + name + ".pth"))
+                model.load_state_dict(torch.load("best_model_yolo_" + name + ".pth"))
                 model.to(DEVICE)
                 print("yolo_" + name)
                 evaluate(model, test_loader)
                 
+    else:
+        
+        if args.model=="best":
+            model = get_model("convnext_tiny", "")
+            model.load_state_dict(torch.load("best_model_convnext_tiny.pth"))
+            YOLO_LIKE=False
+        
+        else: 
+            model = get_model(args.model, "convnext_tiny")
+            model.load_state_dict(torch.load("best_model_yolo_convnext_tiny.pth"))
+            YOLO_LIKE=True
+            
+        
+        model.eval()
+        model.to(DEVICE)
+        
+        #evaluate(model, test_loader)
+
+        # Predict
+        with open(args.json_path, 'r') as f:
+            data = json.load(f)
+
+        results = []
+        for path in tqdm(data["image_files"]):
+            img = Image.open(path).convert("RGB")
+            transform= diff_sizes(224)
+            img = transform(img)
+            img = img.unsqueeze(0).to(DEVICE)
+        
+            with torch.no_grad():
+                    outputs = model(img)
+                    pred = outputs.view(-1).tolist() 
+            results.append({
+            "image": path,
+            "num_pieces": int(np.round(pred))
+        })
+
+        with open("output.json", "w") as f:
+            json.dump(results, f, indent=2)
+            
+             
